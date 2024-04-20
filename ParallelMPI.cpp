@@ -11,17 +11,25 @@ using namespace std;
 const char* inputFileName; // = "../inputs/input1.txt";
 const char* outputFileName; // = "../outputs/output_seq_1.txt";
 
-int debug = 0;
+int debug = 1;
+int logDebug = 0;
+int dataDebug = 0;
 
 //z-function
 void z_function(char* s, int* z) {
-    if(debug){
+    if(logDebug){
         printf("inside z_function\n");
+        printf("s: %s\n", s);
     }
 
     int n = strlen(s);
+    if(dataDebug){
+        for(int i = 0; i < n; i++){
+            printf("before func: z[%d]: %d\n", i, z[i]);
+        }
+    }
 
-    if(debug){
+    if(logDebug){
         printf("z_function: \t n: %d\n", n);
     }
 
@@ -37,35 +45,87 @@ void z_function(char* s, int* z) {
         if (i + z[i] - 1 > r){
             l = i;
             r = i + z[i] - 1;
-        }
-            
+        }   
     }
 
-    if(debug){
+    //print z
+    if(dataDebug){
+        for(int i = 0; i < n; i++){
+            printf("func: z[%d]: %d\n", i, z[i]);
+        }
+    }
+
+    if(logDebug){
         printf("successfully executed z_function\n");
     }
 }
 
 //z-algorithm
-void z_algorithm(char* text, char* pattern, int* res) {
+int* z_algorithm(char* text, char* pattern, int* res) {
     int n = strlen(text);
     int m = strlen(pattern);
+
+    int* z = (int*)malloc((n + m + 1) * sizeof(int));
+
+    //print pattern and text
+    if(logDebug)
+        printf("algo: pattern: %s, text: %s\n", pattern, text);
+
+    //check if memory is allocated
+    if(z == NULL) {
+        printf("Error: Unable to allocate memory for z array\n");
+        return res;
+    }
+    //initialize z array with 0
+    for(int i = 0; i < n + m + 1; i++){
+        z[i] = 0;
+    }
 
     //char s[n + m + 1];
     char* s = (char*)malloc((n + m + 1) * sizeof(char));
 
     //check if memory is allocated
     if(s == NULL) {
-        printf("Error: Unable to allocate memory\n");
-        return;
+        printf("Error: Unable to allocate memory for s array\n");
+        return res;
     }
 
     strcpy(s, pattern);
     s[m] = '$';
     strcpy(s + m + 1, text);
-    z_function(s, res);
+    
+    if(dataDebug)
+        printf("algo: s: %s\n", s);
 
-    return;
+    z_function(s, z);
+
+    //print z values
+    if(dataDebug)
+        for(int i = 0; i < n + m + 1; i++){
+            printf("%d ", z[i]);
+        }
+
+    //copy the z values to res after the pattern length
+    for(int i = m + 1; i < n + m + 1; i++){
+        res[i - m - 1] = z[i];
+    }
+
+    //print res
+    if(dataDebug){
+        cout << "Copied z values to res:" << endl;
+        for(int i = 0; i < n; i++){
+            printf("res[%d]: %d\n", i, res[i]);
+        }
+        cout << endl;
+    }
+       
+
+    if(logDebug){
+        printf("successfully executed z_algorithm\n");
+    }
+
+    return res;
+
 }
 
 int main(int argc, char* argv[]) {
@@ -74,125 +134,239 @@ int main(int argc, char* argv[]) {
     char* text;
     char* pattern;
     long textLength, patternLength, zArrayLength;
+    int* localZArray;
+    long chunkSize;
 
     // Initialize the MPI environment
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    // Read input file
     if(rank == 0){
-        if(argc != 3) {
-            printf("Usage: %s <input file> <output file>\n", argv[0]);
-            return -1;
+        //check if the input file is provided
+        if(argc < 3){
+            printf("Error: Please provide the input file and output file\n");
+            return 0;
         }
-    }
 
         inputFileName = argv[1];
         outputFileName = argv[2];
 
+        //open the input file
         FILE* inputFile = fopen(inputFileName, "r");
 
-        if(inputFile == NULL) {
-            printf("Error: Unable to open read file\n");
-            MPI_Finalize();
-            return -1;
+        //check if the file is opened
+        if(inputFile == NULL){
+            printf("Error: Unable to open the input file\n");
+            return 0;
         }
 
-        //read the text and pattern lengths
+        //read the text and pattern from the input file
         fscanf(inputFile, "%ld %ld", &textLength, &patternLength);
 
-        text = (char*)malloc((textLength) * sizeof(char));
-        pattern = (char*)malloc((patternLength) * sizeof(char));
+        //allocate memory for text and pattern
+        text = (char*)malloc((textLength + 1) * sizeof(char));
+        pattern = (char*)malloc((patternLength + 1) * sizeof(char));
 
-        if(text == NULL || pattern == NULL) {
+        //check if memory is allocated
+        if(text == NULL || pattern == NULL){
             printf("Error: Unable to allocate memory\n");
-            return -1;
+            return 0;
         }
-
-        //read text and pattern
+        
+        //read the text and pattern from the input file
         fscanf(inputFile, "%s", text);
         fscanf(inputFile, "%s", pattern);
+
+        //close inputFile
         fclose(inputFile);
-
-        zArrayLength = textLength + patternLength + 1;
-
-        zArray = (int*)malloc((zArrayLength) * sizeof(int));
-    
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    cout << "rank: " << rank << " textLength: " << textLength << " patternLength: " << patternLength << endl;
-
-    // Broadcast the text and pattern lengths
-    MPI_Bcast(&textLength, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&patternLength, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    //divide the text and pattern into equal parts
-    //if the text and pattern lengths are not divisible by the number of processes
-    //then the last process will have the remaining elements
-    int chunkSize = textLength / size;
-    int remainder = textLength % size;
-
-    int* chunkSizes = (int*)malloc(size * sizeof(int));
-    int* displacements = (int*)malloc(size * sizeof(int));
-
-    for(int i = 0; i < size; i++){
-        chunkSizes[i] = chunkSize;
-        if(i == size - 1){
-            chunkSizes[i] += remainder;
+        
+        if(debug){
+            printf("text: %s\n", text);
+            printf("pattern: %s\n", pattern);
         }
-        displacements[i] = i * chunkSize;
+        
     }
-  
-    MPI_Barrier(MPI_COMM_WORLD);
 
-    // Broadcast the pattern
+    //receive the text and pattern length from the root process
+    MPI_Bcast(&textLength, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&patternLength, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+
+    //broadcast pattern to all processes
     MPI_Bcast(pattern, patternLength, MPI_CHAR, 0, MPI_COMM_WORLD);
+    
+   
+    //printf("rank: %d, textLength: %ld, patternLength: %ld\n", rank, textLength, patternLength);
 
-    // Scatter the text
-    char* localText = (char*)malloc((chunkSize + 1) * sizeof(char));
+    //MPI_Barrier(MPI_COMM_WORLD);
 
-    cout << "rank: " << rank << " chunkSize: " << chunkSize << " displacements: " << displacements[rank] << endl;
-    MPI_Scatterv(text, chunkSizes, displacements, MPI_CHAR, localText, chunkSize, MPI_CHAR, 0, MPI_COMM_WORLD);
-
-
-    // Call z_algorithm
-    z_algorithm(text, pattern, zArray);
-
-    // Gather the results
-    int* res = (int*)malloc((textLength + patternLength + 1) * sizeof(int));
-    MPI_Gather(zArray, textLength + patternLength + 1, MPI_INT, res, textLength + patternLength + 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    // Write the results to the output file
     if(rank == 0){
-        FILE* outputFile = fopen(outputFileName, "w");
+        //calculate chunk size and remaining size for each process
+        chunkSize = textLength / size;
+        long remainingSize = textLength % size;
 
-        if(outputFile == NULL) {
-            printf("Error: Unable to open write file\n");
-            return -1;
-        }
-
-        int isMatchFound = 0;
-
-        for(int i = 0; i < textLength + patternLength + 1; i++){
-            if(res[i] == patternLength){
-                fprintf(outputFile, "Pattern found at index: %ld\n", i - patternLength);
-                isMatchFound = 1;
+        //send the chunk size and remaining size to each process
+        for(int i = 1; i < size; i++){
+            long localChunkSize = chunkSize;
+            if(i == size - 1){
+                localChunkSize += remainingSize;
             }
+
+            MPI_Send(&localChunkSize, 1, MPI_LONG, i, 0, MPI_COMM_WORLD);
+            MPI_Send(text + i * chunkSize, localChunkSize, MPI_CHAR, i, 0, MPI_COMM_WORLD);
         }
 
-        if(!isMatchFound){
-            fprintf(outputFile, "Pattern not found\n");
-        }
-        fclose(outputFile);
+        if(debug && logDebug)
+            printf("rank: %d, chunkSize: %ld\n", rank, chunkSize);
 
-        printf("Output written to %s\n", outputFileName);
+        //allocate memory for local text
+        char* localText = (char*)malloc((chunkSize) * sizeof(char));
+
+        //check if memory is allocated
+        if(localText == NULL){
+            printf("Error: Unable to allocate memory\n");
+            return 0;
+        }
+
+        //copy the text to local text
+        strncpy(localText, text, chunkSize);
+
+        //add null character at the end of the local text
+        localText[chunkSize] = '\0';
+
+        //print localText
+        if(debug && logDebug)
+            printf("rank: %d, localText: %s\n", rank, localText);
+
+        //declare local zArray
+        localZArray = (int*)malloc((chunkSize) * sizeof(int));
+
+        //check if memory is allocated
+        if(localZArray == NULL){
+            printf("Error: Unable to allocate memory\n");
+            return 0;
+        }
+
+        //print localZArray
+        if(debug && logDebug){
+            for(int i = 0; i < chunkSize + patternLength + 1; i++){
+                printf("%d ", rank, i, localZArray[i]);
+            }
+            printf("\n");
+        }
+
+        //call z_algorithm
+        localZArray = z_algorithm(localText, pattern, localZArray);
+
+        //print zArray
+        if(debug && logDebug)
+            for(int i = 0; i < chunkSize + patternLength + 1; i++){
+                printf("rank: %d, zArray[%d]: %d\n", rank, i, localZArray[i]);
+            }
+    }
+    else{
+        //receive the chunk size from the root process
+        
+        MPI_Recv(&chunkSize, 1, MPI_LONG, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        //print the chunk size
+        if(debug)
+            printf("rank: %d, chunkSize: %ld\n", rank, chunkSize);
+
+        //allocate memory for local text
+        char* localText = (char*)malloc((chunkSize) * sizeof(char));
+
+        //check if memory is allocated
+        if(localText == NULL){
+            printf("Error: Unable to allocate memory\n");
+            return 0;
+        }
+
+        //receive the text from the root process
+        MPI_Recv(localText, chunkSize, MPI_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        //add null character at the end of the local text
+        localText[chunkSize] = '\0';
+
+        //print localText
+        if(debug)
+            printf("rank: %d, localText: %s\n", rank, localText);
+
+        //declare local zArray
+        localZArray = (int*)malloc((chunkSize) * sizeof(int));
+
+        //check if memory is allocated
+        if(localZArray == NULL){
+            printf("Error: Unable to allocate memory\n");
+            return 0;
+        }
+        //call z_algorithm
+        localZArray = z_algorithm(localText, pattern, localZArray);
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    MPI_Finalize();
+    cout << "gathering zArrays" << endl;
 
+    //gathering all the local zArrays to zArray which can be of different sizes
+    if(rank == 0){
+
+        //allocate memory for zArray
+        zArrayLength = textLength;
+        zArray = (int*)malloc(zArrayLength * sizeof(int));
+
+        //check if memory is allocated
+        if(zArray == NULL){
+            printf("Error: Unable to allocate memory\n");
+            return 0;
+        }
+
+        int recvSize = chunkSize;
+
+        //recv chunkSize from each process and print it
+        for(int i = 1; i < size; i++){
+            long localChunkSize;
+            MPI_Recv(&localChunkSize, 1, MPI_LONG, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if(debug)
+                printf("rank: %d, localChunkSize: %ld\n", i, localChunkSize);
+
+            //allocate memory for localZArray
+            int* localZArray = (int*)malloc((localChunkSize) * sizeof(int));
+
+            //receive the localZArray from each process
+            MPI_Recv(localZArray, localChunkSize, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            //copy the localZArray to zArray
+            for(int j = 0; j < localChunkSize; j++){
+                zArray[recvSize + j] = localZArray[j];
+            }
+
+            //update recvSize
+            recvSize += localChunkSize;
+        }
+
+        //print zArray
+        if(debug)
+            for(int i = 0; i < zArrayLength; i++){
+                printf("%d ", zArray[i]);
+            }   
+    }
+    else{
+        //send the chunkSize to the root process
+        MPI_Send(&chunkSize, 1, MPI_LONG, 0, 0, MPI_COMM_WORLD);
+
+        //send the localZArray to the root process
+        MPI_Send(localZArray, chunkSize, MPI_INT, 0, 0, MPI_COMM_WORLD);
+    }
+
+   
+
+    //MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Finalize();
+    cout << "after MPI_Finalize by rank: " << rank << endl;
+
+
+    if(debug && rank == 0){
+        printf("successfully executed main\n");
+    }
     return 0;
 }
 
