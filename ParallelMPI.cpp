@@ -15,20 +15,43 @@ int debug = 0;
 int logDebug = 0;
 int dataDebug = 0;
 
-int isPrefixSuffix(char* text, char* pattern){
+void isPrefixSuffix(char* text, char* pattern, int &pos, int &isPrefixRepeated){
     string s1(text);
     string s2(pattern);
 
     int n1 = s1.length();
     int n2 = s2.length();
-    int pos = -1;
+
+    //if text length is greater than pattern then truncate the text
+    if(n1 > n2){
+        s1 = s1.substr(0, n2);
+    }
+
+    pos = -1;
     for (int i = 0; i < min(n1, n2); i++) {
         if (s1.substr(0, i+1) == s2.substr(n2-i-1)) {
             pos = i;
-            return pos;
+            break;
         }
     }
-    return pos;
+
+    //check if the prefix is repeated in the pattern
+    int temp = pos;
+
+    //for eg. if pattern = "ccc" and text = "ccccc" then the prefix is repeated
+    //if the text prefix is repeated in the pattern, increment isPrefixRepeated
+    for (int i = 0; i < n2; i++) {
+        if (s1.substr(0, temp+1) == s2.substr(n2-i-1)) {
+            isPrefixRepeated++;
+            temp--;
+        }
+        else{
+            break;
+        }
+    }
+
+    cout << "isPrefixRepeated: " << isPrefixRepeated << endl;
+
 }
 
 
@@ -78,7 +101,7 @@ void z_function(char* s, int* z) {
 }
 
 //z-algorithm
-int* z_algorithm(char* text, char* pattern, int* res, int &found) {
+int* z_algorithm(char* text, char* pattern, int* res, int &found, int &isPrefixRepeated) {
     int n = strlen(text);
     int m = strlen(pattern);
 
@@ -116,7 +139,9 @@ int* z_algorithm(char* text, char* pattern, int* res, int &found) {
 
     z_function(s, z);
 
-    found = isPrefixSuffix(text, pattern);
+    isPrefixRepeated = 0;
+
+    isPrefixSuffix(text, pattern, found, isPrefixRepeated);
 
     //print z values
     if(dataDebug)
@@ -163,7 +188,7 @@ void writeOutputToTxt(int* zArray, long zArrayLength, int patternLength){
     //write the zArray to the output file
     for(int i = 0; i < zArrayLength; i++){
         if(zArray[i] == patternLength){
-            fprintf(outputFile, "pattern found at index %d\n", i+1);
+            fprintf(outputFile, "Pattern found at index: %ld\n", i+1);
             isMatchFound = 1;
         }
     }
@@ -185,6 +210,7 @@ int main(int argc, char* argv[]) {
     int* localZArray;
     long chunkSize;
     int isDivided = -1;
+    int isPrefixRepeated = 0;
 
     // Initialize the MPI environment
     MPI_Init(&argc, &argv);
@@ -298,9 +324,10 @@ int main(int argc, char* argv[]) {
         }
 
         //call z_algorithm
-        localZArray = z_algorithm(localText, pattern, localZArray, isDivided);
+        localZArray = z_algorithm(localText, pattern, localZArray, isDivided, isPrefixRepeated);
 
         cout << "isDivided by rank" << rank << " is " << isDivided << endl;
+        cout << "isPrefixRepeated by rank" << rank << " is " << isPrefixRepeated << endl;
     
 
         //print zArray
@@ -346,10 +373,11 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         //call z_algorithm
-        localZArray = z_algorithm(localText, pattern, localZArray, isDivided);
+        localZArray = z_algorithm(localText, pattern, localZArray, isDivided, isPrefixRepeated);
 
         if(isDivided != -1)
             cout << "isDivided by rank" << rank << " is " << isDivided << endl;
+            cout << "isPrefixRepeated by rank" << rank << " is " << isPrefixRepeated << endl;
     }
 
     cout << "gathering zArrays" << endl;
@@ -387,6 +415,7 @@ int main(int argc, char* argv[]) {
             //receive the localZArray from each process
             MPI_Recv(localZArray, localChunkSize, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             MPI_Recv(&isDivided, 1, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&isPrefixRepeated, 1, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
             if(isDivided != -1)
                 cout << "combinging: isDivided by rank" << i << " is " << isDivided << endl;
@@ -395,18 +424,38 @@ int main(int argc, char* argv[]) {
             //to verify that we check the zArray[recvSize - patternLength] == patternLength - isDivided 
             //eg. if patternLength = 3 and isDivided = 1 then we check zArray[recvSize - isDivided] == patternLength - isDivided
             if(isDivided != -1){
-                int pos = recvSize - (patternLength - (isDivided + 1));
-                cout << pos << " " << patternLength - isDivided << endl;
-                cout << zArray[pos] << " " << patternLength - (isDivided+1) << endl;
+                //isPrefixRepeated meaning the prefix is repeated in the pattern
+                //then subsequent z values should be incremented by 1
+                
 
-                if(zArray[pos] == patternLength - isDivided -1){
-                    cout << "pattern found at index " << pos+1 << endl;
+
+                int pos = recvSize - (patternLength - (isDivided + 1));
+                //cout << pos << " " << patternLength - isDivided << endl;
+                //cout << zArray[pos] << " " << patternLength - (isDivided+1) << endl;
+                int s = 1;
+                while(isPrefixRepeated >= 0){
+                    if(zArray[pos] == patternLength - isDivided -s){
+                        //cout << "pattern found at index " << pos+1 << endl;
+                        //update the zArray
+                        zArray[pos] = patternLength;
+                    }
+                    else{
+                        cout << "pattern not found" << endl;
+                    }
+                    pos++;
+                    isPrefixRepeated--;
+                    s++;
+                }
+
+                /*if(zArray[pos] == patternLength - isDivided -1){
+                    //cout << "pattern found at index " << pos+1 << endl;
                     //update the zArray
                     zArray[pos] = patternLength;
                 }
                 else{
                     cout << "pattern not found" << endl;
                 }
+                */
             }
 
 
@@ -447,6 +496,7 @@ int main(int argc, char* argv[]) {
         //send the localZArray to the root process
         MPI_Send(localZArray, chunkSize, MPI_INT, 0, 0, MPI_COMM_WORLD);
         MPI_Send(&isDivided, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(&isPrefixRepeated, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
     }
 
 
@@ -458,3 +508,4 @@ int main(int argc, char* argv[]) {
     }
     return 0;
 }
+
