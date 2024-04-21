@@ -11,9 +11,26 @@ using namespace std;
 const char* inputFileName; // = "../inputs/input1.txt";
 const char* outputFileName; // = "../outputs/output_seq_1.txt";
 
-int debug = 1;
+int debug = 0;
 int logDebug = 0;
 int dataDebug = 0;
+
+int isPrefixSuffix(char* text, char* pattern){
+    string s1(text);
+    string s2(pattern);
+
+    int n1 = s1.length();
+    int n2 = s2.length();
+    int pos = -1;
+    for (int i = 0; i < min(n1, n2); i++) {
+        if (s1.substr(0, i+1) == s2.substr(n2-i-1)) {
+            pos = i;
+            return pos;
+        }
+    }
+    return pos;
+}
+
 
 //z-function
 void z_function(char* s, int* z) {
@@ -61,7 +78,7 @@ void z_function(char* s, int* z) {
 }
 
 //z-algorithm
-int* z_algorithm(char* text, char* pattern, int* res) {
+int* z_algorithm(char* text, char* pattern, int* res, int &found) {
     int n = strlen(text);
     int m = strlen(pattern);
 
@@ -98,6 +115,8 @@ int* z_algorithm(char* text, char* pattern, int* res) {
         printf("algo: s: %s\n", s);
 
     z_function(s, z);
+
+    found = isPrefixSuffix(text, pattern);
 
     //print z values
     if(dataDebug)
@@ -165,6 +184,7 @@ int main(int argc, char* argv[]) {
     long textLength, patternLength, zArrayLength;
     int* localZArray;
     long chunkSize;
+    int isDivided = -1;
 
     // Initialize the MPI environment
     MPI_Init(&argc, &argv);
@@ -217,17 +237,10 @@ int main(int argc, char* argv[]) {
         
     }
 
-    //receive the text and pattern length from the root process
+    //receive the text, pattern length and pattern from the root process
     MPI_Bcast(&textLength, 1, MPI_LONG, 0, MPI_COMM_WORLD);
     MPI_Bcast(&patternLength, 1, MPI_LONG, 0, MPI_COMM_WORLD);
-
-    //broadcast pattern to all processes
     MPI_Bcast(pattern, patternLength, MPI_CHAR, 0, MPI_COMM_WORLD);
-    
-   
-    //printf("rank: %d, textLength: %ld, patternLength: %ld\n", rank, textLength, patternLength);
-
-    //MPI_Barrier(MPI_COMM_WORLD);
 
     if(rank == 0){
         //calculate chunk size and remaining size for each process
@@ -285,7 +298,10 @@ int main(int argc, char* argv[]) {
         }
 
         //call z_algorithm
-        localZArray = z_algorithm(localText, pattern, localZArray);
+        localZArray = z_algorithm(localText, pattern, localZArray, isDivided);
+
+        cout << "isDivided by rank" << rank << " is " << isDivided << endl;
+    
 
         //print zArray
         if(debug && logDebug)
@@ -330,7 +346,10 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         //call z_algorithm
-        localZArray = z_algorithm(localText, pattern, localZArray);
+        localZArray = z_algorithm(localText, pattern, localZArray, isDivided);
+
+        if(isDivided != -1)
+            cout << "isDivided by rank" << rank << " is " << isDivided << endl;
     }
 
     cout << "gathering zArrays" << endl;
@@ -367,6 +386,29 @@ int main(int argc, char* argv[]) {
 
             //receive the localZArray from each process
             MPI_Recv(localZArray, localChunkSize, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&isDivided, 1, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            if(isDivided != -1)
+                cout << "combinging: isDivided by rank" << i << " is " << isDivided << endl;
+
+            //isDivided meaning there is a probability that the text is divided between two processes
+            //to verify that we check the zArray[recvSize - patternLength] == patternLength - isDivided 
+            //eg. if patternLength = 3 and isDivided = 1 then we check zArray[recvSize - isDivided] == patternLength - isDivided
+            if(isDivided != -1){
+                int pos = recvSize - (patternLength - (isDivided + 1));
+                cout << pos << " " << patternLength - isDivided << endl;
+                cout << zArray[pos] << " " << patternLength - (isDivided+1) << endl;
+
+                if(zArray[pos] == patternLength - isDivided -1){
+                    cout << "pattern found at index " << pos+1 << endl;
+                    //update the zArray
+                    zArray[pos] = patternLength;
+                }
+                else{
+                    cout << "pattern not found" << endl;
+                }
+            }
+
 
             //print localZArray
             if(debug && dataDebug){
@@ -404,15 +446,15 @@ int main(int argc, char* argv[]) {
 
         //send the localZArray to the root process
         MPI_Send(localZArray, chunkSize, MPI_INT, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(&isDivided, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
     }
 
 
     //MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
     
-    if(debug && rank == 0){
+    if(debug || rank == 0){
         printf("successfully executed main\n");
     }
     return 0;
 }
-
