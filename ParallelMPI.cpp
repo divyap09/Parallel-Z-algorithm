@@ -319,6 +319,11 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
+        //copy the localZArray to zArray
+        for(int i = 0; i < chunkSize; i++){
+            zArray[i] = localZArray[i];
+        }
+
         int recvSize = chunkSize;
 
         //recv chunkSize from each process and print it
@@ -334,6 +339,15 @@ int main(int argc, char* argv[]) {
             //receive the localZArray from each process
             MPI_Recv(localZArray, localChunkSize, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
+            //print localZArray
+            if(debug && dataDebug){
+                printf("rank: %d, localZArray: ", i);
+                for(int j = 0; j < localChunkSize; j++){
+                    printf("%d ", i, j, localZArray[j]);
+                }
+                printf("\n");
+            }
+
             //copy the localZArray to zArray
             for(int j = 0; j < localChunkSize; j++){
                 zArray[recvSize + j] = localZArray[j];
@@ -344,10 +358,13 @@ int main(int argc, char* argv[]) {
         }
 
         //print zArray
-        if(debug)
+        if(debug){
+            printf("final zArray: ");
             for(int i = 0; i < zArrayLength; i++){
                 printf("%d ", zArray[i]);
-            }   
+            }
+            printf("\n");
+        }  
     }
     else{
         //send the chunkSize to the root process
@@ -357,16 +374,12 @@ int main(int argc, char* argv[]) {
         MPI_Send(localZArray, chunkSize, MPI_INT, 0, 0, MPI_COMM_WORLD);
     }
 
-   
 
     //MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
-    cout << "after MPI_Finalize by rank: " << rank << endl;
-
-
+    
     if(debug && rank == 0){
         printf("successfully executed main\n");
     }
     return 0;
 }
-
