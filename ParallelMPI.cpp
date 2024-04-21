@@ -128,6 +128,35 @@ int* z_algorithm(char* text, char* pattern, int* res) {
 
 }
 
+//write the output to the output file
+void writeOutputToTxt(int* zArray, long zArrayLength, int patternLength){
+    //open the output file
+    FILE* outputFile = fopen(outputFileName, "w");
+
+    //check if the file is opened
+    if(outputFile == NULL){
+        printf("Error: Unable to open the output file\n");
+        return;
+    }
+
+    int isMatchFound = 0;
+
+    //write the zArray to the output file
+    for(int i = 0; i < zArrayLength; i++){
+        if(zArray[i] == patternLength){
+            fprintf(outputFile, "pattern found at index %d\n", i+1);
+            isMatchFound = 1;
+        }
+    }
+
+    if(!isMatchFound){
+        fprintf(outputFile, "pattern not found\n");
+    }
+
+    //close the output file
+    fclose(outputFile);
+}
+
 int main(int argc, char* argv[]) {
     int rank, size;
     int* zArray;
@@ -365,6 +394,9 @@ int main(int argc, char* argv[]) {
             }
             printf("\n");
         }  
+
+        //write the output to the output file
+        writeOutputToTxt(zArray, zArrayLength, patternLength);
     }
     else{
         //send the chunkSize to the root process
@@ -383,3 +415,4 @@ int main(int argc, char* argv[]) {
     }
     return 0;
 }
+
