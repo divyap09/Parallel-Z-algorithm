@@ -5,68 +5,57 @@
 #include <stdlib.h>
 #include <vector>
 #include <time.h>
+#include <fstream>
+#include <chrono>
 #include "mpi.h"
 
 using namespace std;
-
 const char* inputFileName; // = "../inputs/input1.txt";
 const char* outputFileName; // = "../outputs/output_seq_1.txt";
-
 int debug = 0;
 int logDebug = 0;
 int dataDebug = 0;
+int writeToTxt = 0;
+double startTime1, endTime1;
 
-void isPrefixSuffix(char* text, char* pattern, int &pos, int &isPrefixRepeated){
-
+void isPrefixSuffix(char* text, char* pattern, int &pos){
     string patternStr = pattern;
-    string textStr = text;
-
+    //string textStr = text;
     int patternLength = patternStr.length();
     
     //truncate the text to the pattern length -1
-    string truncatedText = textStr.substr(0, patternLength - 1);
+    string truncatedText = "";
+    for(int i = 0; i < patternLength - 1; i++){
+        truncatedText += text[i];
+    }
 
-    cout << "truncated text: "<< truncatedText << endl;
-    cout << "pattern: " << patternStr << endl;
-
+    if(dataDebug){
+        cout << "truncated text: "<< truncatedText << endl;
+        cout << "pattern: " << patternStr << endl;
+    }
+   
     //check all the suffixes of the pattern are present in the truncated text prefix
-    int found = 0;
     int isSuffixFound = 0;
     string suffix = "";
 
     //list to store all the suffixes of the pattern
     vector<string> suffixes;
-
     for(int i = patternLength-1; i >=0 ; i--){
         suffix = patternStr.substr(i, patternLength - i);
         if(truncatedText.find(suffix) != string::npos){
-            //found++;
-            //cout << "suffix found: " << suffix << endl;
             suffixes.push_back(suffix);
             pos = suffix.length();
+            break;
         }
     }
-
-    //print the suffixes
-    /*
-    cout << "suffixes:";
-    for(int i = 0; i < suffixes.size(); i++){
-        cout << " " << suffixes[i];
-    }
-    cout << endl;
-    */
     
-
     //print the found value 
-    //if(dataDebug)
-    cout << "found: " << found << endl;
+    if(dataDebug){
+        cout << "pos: " << pos << endl;
+    }
 
-    //isPrefixRepeated = pos;
-
-
-    cout << "pos: " << pos << endl;
-    cout << "isPrefixRepeated: " << isPrefixRepeated << endl;
-
+    patternStr.clear();
+    truncatedText.clear();
 }
 
 //z-function
@@ -75,7 +64,6 @@ void z_function(char* s, int* z) {
         printf("inside z_function\n");
         printf("s: %s\n", s);
     }
-
     int n = strlen(s);
     if(dataDebug && 0){
         printf("Before func: n: %d\n", n);
@@ -84,11 +72,9 @@ void z_function(char* s, int* z) {
         }
         printf("\n");
     }
-
     if(logDebug){
         printf("z_function: \t n: %d\n", n);
     }
-
     for (int i = 1, l = 0, r = 0; i < n; i++) {
         if (i <= r){
             z[i] = (r - i + 1) < z[i - l] ? (r - i + 1) : z[i - l];
@@ -103,78 +89,55 @@ void z_function(char* s, int* z) {
             r = i + z[i] - 1;
         }   
     }
-
-    /*
-    //print z
-    if(dataDebug){
-        printf("After func: n: %d\n", n);
-        //print res
-        for(int i = 0; i < n; i++){
-            printf("%d ", z[i]);
-        }
-    }
-    */
-
+ 
     if(logDebug){
         printf("successfully executed z_function\n");
     }
 }
 
 //z-algorithm
-int* z_algorithm(char* text, char* pattern, int* res, int &found, int &isPrefixRepeated) {
-    int n = strlen(text);
-    int m = strlen(pattern);
-
+void z_algorithm(char* text, long n, char* pattern, long m, int* res) {
+   
     int* z = (int*)malloc((n + m + 1) * sizeof(int));
-
     //print pattern and text
     if(logDebug)
         printf("z-algo: pattern: %s, text: %s\n", pattern, text);
-
     //check if memory is allocated
     if(z == NULL) {
         printf("\tError: Unable to allocate memory for z array\n");
-        return res;
+        return;
     }
     //initialize z array with 0
     for(int i = 0; i < n + m + 1; i++){
         z[i] = 0;
     }
-
     //char s[n + m + 1];
     char* s = (char*)malloc((n + m + 1) * sizeof(char));
-
     //check if memory is allocated
     if(s == NULL) {
         printf("\tError: Unable to allocate memory for s array\n");
-        return res;
+        return;
     }
-
     strcpy(s, pattern);
     s[m] = '$';
     strcpy(s + m + 1, text);
     
     if(dataDebug)
         printf("\talgo: s: %s\n", s);
-
     z_function(s, z);
-
-    isPrefixRepeated = 0;
-
-    isPrefixSuffix(text, pattern, found, isPrefixRepeated);
-
+    
     //print z values
-    if(dataDebug)
+    if(dataDebug){
         for(int i = 0; i < n + m + 1; i++){
             printf("%d ", z[i]);
         }
-    printf("\n");
-
+        printf("\n");
+    }
+        
     //copy the z values to res after the pattern length
     for(int i = m + 1; i < n + m + 1; i++){
-        res[i - m - 1] = z[i];
+        res[i - (m + 1)] = z[i];
     }
-
     //print res
     if(dataDebug){
         cout << "\tCopied z values to res:";
@@ -184,27 +147,43 @@ int* z_algorithm(char* text, char* pattern, int* res, int &found, int &isPrefixR
         cout << endl;
     }
        
-
     if(logDebug){
         printf("successfully executed z_algorithm\n");
     }
+    return;
+}
 
-    return res;
+void writeOutputToBinary(int* zArray, long zArrayLength){
+    //open the output file
+
+    int len = strlen(outputFileName);
+    char binOutput[len + 4];
+    strcpy(binOutput, outputFileName);
+    strcat(binOutput, ".bin");
+
+    FILE* outputFile = fopen(binOutput, "wb");
+    //check if the file is opened
+    if(outputFile == NULL){
+        printf("Error: Unable to open the output file\n");
+        return;
+    }
+    //write the zArray to the output file
+    fwrite(zArray, sizeof(int), zArrayLength, outputFile);
+    //close the output file
+    fclose(outputFile);
+    cout << "Output written to " << binOutput << endl;
 }
 
 //write the output to the output file
 void writeOutputToTxt(int* zArray, long zArrayLength, int patternLength){
     //open the output file
     FILE* outputFile = fopen(outputFileName, "w");
-
     //check if the file is opened
     if(outputFile == NULL){
         printf("Error: Unable to open the output file\n");
         return;
     }
-
     int isMatchFound = 0;
-
     //write the zArray to the output file
     for(int i = 0; i < zArrayLength; i++){
         if(zArray[i] == patternLength){
@@ -212,14 +191,12 @@ void writeOutputToTxt(int* zArray, long zArrayLength, int patternLength){
             isMatchFound = 1;
         }
     }
-    //write zArray to the output file
-    for(int i = 0; i < zArrayLength; i++){
-        fprintf(outputFile, "%d ", zArray[i]);
-    }
 
     if(!isMatchFound){
         fprintf(outputFile, "pattern not found\n");
     }
+
+    cout << "Output written to " << outputFileName << endl;
 
     //close the output file
     fclose(outputFile);
@@ -228,14 +205,17 @@ void writeOutputToTxt(int* zArray, long zArrayLength, int patternLength){
 int main(int argc, char* argv[]) {
     int rank, size;
     int* zArray;
-    char* text;
+    char *text;
     char* pattern;
-    long textLength, patternLength, zArrayLength;
-    int* localZArray;
-    long chunkSize;
-    int isDivided = -1;
-    int isPrefixRepeated = 0;
+    string temptext, temppattern;
 
+    long textLength, patternLength, zArrayLength, chunkSize;
+    int* localZArray;
+    int isDivided = -1, isPrefixRepeated = 0;
+    long localChunkSize;
+
+    srand(time(NULL));
+    
     // Initialize the MPI environment
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -245,183 +225,172 @@ int main(int argc, char* argv[]) {
         //check if the input file is provided
         if(argc < 3){
             printf("Error: Please provide the input file and output file\n");
+            MPI_Finalize();
             return 0;
         }
-
         inputFileName = argv[1];
         outputFileName = argv[2];
-
         //open the input file
-        FILE* inputFile = fopen(inputFileName, "r");
-
+        ifstream inputFile(inputFileName);
         //check if the file is opened
-        if(inputFile == NULL){
+        if(!inputFile.is_open()){
             printf("Error: Unable to open the input file\n");
+            MPI_Finalize();
             return 0;
         }
 
-        //read the text and pattern from the input file
-        fscanf(inputFile, "%ld %ld", &textLength, &patternLength);
+        //reading the text
+        getline(inputFile, temptext);
+        getline(inputFile, temppattern);
 
-        //allocate memory for text and pattern
+        textLength = temptext.length();
+        patternLength = temppattern.length();
+
+        //close the input file
+        inputFile.close();
+
+        //allocate memory for text
         text = (char*)malloc((textLength + 1) * sizeof(char));
-        pattern = (char*)malloc((patternLength + 1) * sizeof(char));
-
         //check if memory is allocated
-        if(text == NULL || pattern == NULL){
-            printf("Error: Unable to allocate memory\n");
+        if(text == NULL){
+            printf("Error: Unable to allocate memory for text\n");
             return 0;
         }
-        
-        //read the text and pattern from the input file
-        fscanf(inputFile, "%s", text);
-        fscanf(inputFile, "%s", pattern);
 
-        //close inputFile
-        fclose(inputFile);
-        
-        if(debug){
+        //copy the text to text
+        strcpy(text, temptext.c_str());
+        text[textLength] = '\0';
+
+        //allocate memory for pattern
+        pattern = (char*)malloc((patternLength + 1) * sizeof(char));
+        //check if memory is allocated
+        if(pattern == NULL){
+            printf("Error: Unable to allocate memory for pattern\n");
+            return 0;
+        }
+
+        //copy the pattern to pattern
+        strcpy(pattern, temppattern.c_str());
+        pattern[patternLength] = '\0';
+
+        cout << "textLength: " << textLength << endl;
+        cout << "patternLength: " << patternLength << endl;
+        cout << "size: " << size << endl;
+
+        if(dataDebug){
             printf("text: %s\n", text);
             printf("pattern: %s\n", pattern);
         }
-        
+
+        temptext.clear();
+        temppattern.clear();
     }
 
-    //receive the text, pattern length and pattern from the root process
-    MPI_Bcast(&textLength, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD);
     MPI_Bcast(&patternLength, 1, MPI_LONG, 0, MPI_COMM_WORLD);
-    MPI_Bcast(pattern, patternLength, MPI_CHAR, 0, MPI_COMM_WORLD);
 
+    if(rank != 0){
+        pattern = (char*)malloc((patternLength + 1) * sizeof(char));
+        //check if memory is allocated
+        if(pattern == NULL){
+            printf("Error: Unable to allocate memory for pattern\n");
+            return 0;
+        }
+    }
+
+    MPI_Bcast(pattern, patternLength+1, MPI_CHAR, 0, MPI_COMM_WORLD);
+    //pattern[patternLength] = '\0';
+
+    if(dataDebug){
+        cout << "Rank " << rank << " received pattern: " << pattern << endl;
+    }
+ 
     if(rank == 0){
         //calculate chunk size and remaining size for each process
+        //but the chunk size will have additional pattern length
         chunkSize = textLength / size;
         long remainingSize = textLength % size;
-
-        //send the chunk size and remaining size to each process
-        for(int i = 1; i < size; i++){
-            long localChunkSize = chunkSize;
+        
+        for(int i = 1;i < size;i++){
+            localChunkSize = chunkSize;
+            
             if(i == size - 1){
                 localChunkSize += remainingSize;
             }
 
+            //send the chunk size to each process
             MPI_Send(&localChunkSize, 1, MPI_LONG, i, 0, MPI_COMM_WORLD);
             MPI_Send(text + i * chunkSize, localChunkSize, MPI_CHAR, i, 0, MPI_COMM_WORLD);
         }
 
-        if(debug && logDebug)
-            printf("rank: %d, chunkSize: %ld\n", rank, chunkSize);
-
-        //allocate memory for local text
-        char* localText = (char*)malloc((chunkSize) * sizeof(char));
+        localChunkSize = chunkSize;
+        char* localText = (char*)malloc((localChunkSize+1) * sizeof(char));
 
         //check if memory is allocated
         if(localText == NULL){
-            printf("Error: Unable to allocate memory\n");
+            printf("Error: Unable to allocate memory for localText\n");
             return 0;
         }
 
-        //copy the text to local text
-        strncpy(localText, text, chunkSize);
+        //copy the text to localText using memcpy
+        strncpy(localText, text, localChunkSize);
+        //memcpy(localText, text, localChunkSize);
+        localText[localChunkSize] = '\0';
 
-        //add null character at the end of the local text
-        localText[chunkSize] = '\0';
+        if(logDebug){
+            cout << "Rank " << rank << " received text: " << localText << endl;
+        }
 
-        //print localText
-        if(debug && logDebug)
-            printf("rank: %d, localText: %s\n", rank, localText);
+        localZArray = (int*)malloc(localChunkSize * sizeof(int));
 
-        //declare local zArray
-        localZArray = (int*)malloc((chunkSize) * sizeof(int));
-
-        //check if memory is allocated
         if(localZArray == NULL){
-            printf("Error: Unable to allocate memory\n");
+            printf("Error: Unable to allocate memory for localZArray\n");
             return 0;
         }
-
-        /*
-        //print localZArray
-        if(debug && logDebug){
-            printf("rank: %d, localZArray: ", rank);
-            for(int i = 0; i < chunkSize + patternLength + 1; i++){
-                printf("%d ", rank, i, localZArray[i]);
-            }
-            printf("\n");
-        }
-        */
-
-        //call z_algorithm
-        localZArray = z_algorithm(localText, pattern, localZArray, isDivided, isPrefixRepeated);
-
-        //cout << "isDivided by rank" << rank << " is " << isDivided << endl;
-        //cout << "isPrefixRepeated by rank" << rank << " is " << isPrefixRepeated << endl;
-    
-        //print localZArray
-        if(debug && logDebug){
-            printf("rank: %d, localZArray: ", rank);
-            for(int i = 0; i < chunkSize; i++){
-                printf("%d ", localZArray[i]);
-            }
-            printf("\n");
-        }
-
+        //cout << "Rank 0 calling z_algorithm" << endl;
+        startTime1 = clock();
+        z_algorithm(localText, localChunkSize, pattern, patternLength, localZArray);
+        
+        //free(localText);       
     }
     else{
-        //receive the chunk size from the root process
-        
+        //cout <<"Rank "<< rank << " pattern" << pattern << endl;
         MPI_Recv(&chunkSize, 1, MPI_LONG, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        //print the chunk size
-        if(debug)
-            printf("rank: %d, chunkSize: %ld\n", rank, chunkSize);
-
-        //allocate memory for local text
-        char* localText = (char*)malloc((chunkSize) * sizeof(char));
-
+        char *localText = (char*)malloc((chunkSize + 1) * sizeof(char));
         //check if memory is allocated
         if(localText == NULL){
-            printf("Error: Unable to allocate memory\n");
+            printf("Error: Unable to allocate memory for localText\n");
             return 0;
         }
-
-        //receive the text from the root process
         MPI_Recv(localText, chunkSize, MPI_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        //add null character at the end of the local text
         localText[chunkSize] = '\0';
 
-        //print localText
-        if(debug)
-            printf("rank: %d, localText: %s\n", rank, localText);
+        if(logDebug){
+            cout << "Rank " << rank << " received text: " << localText << endl;
+        }
 
-        //declare local zArray
-        localZArray = (int*)malloc((chunkSize) * sizeof(int));
-
+        localZArray = (int*)malloc(chunkSize * sizeof(int));
         //check if memory is allocated
         if(localZArray == NULL){
-            printf("Error: Unable to allocate memory\n");
+            printf("Error: Unable to allocate memory for localZArray\n");
             return 0;
         }
-        //call z_algorithm
-        localZArray = z_algorithm(localText, pattern, localZArray, isDivided, isPrefixRepeated);
-
+        z_algorithm(localText, chunkSize, pattern, patternLength, localZArray);
+        isPrefixSuffix(text, pattern, isDivided);
         if(logDebug && isDivided != -1)
             cout << "isDivided by rank" << rank << " is " << isDivided << endl;
-            cout << "isPrefixRepeated by rank" << rank << " is " << isPrefixRepeated << endl;
     }
 
-    cout << "gathering zArrays" << endl;
+    if(logDebug)
+        cout << "Preprocessing done by rank " << rank << endl;
 
-    //gathering all the local zArrays to zArray which can be of different sizes
     if(rank == 0){
-
-        //allocate memory for zArray
         zArrayLength = textLength;
         zArray = (int*)malloc(zArrayLength * sizeof(int));
 
         //check if memory is allocated
         if(zArray == NULL){
-            printf("Error: Unable to allocate memory\n");
+            printf("Error: Unable to allocate memory for zArray\n");
             return 0;
         }
 
@@ -432,41 +401,32 @@ int main(int argc, char* argv[]) {
 
         int recvSize = chunkSize;
 
-        //recv chunkSize from each process and print it
         for(int i = 1; i < size; i++){
-            long localChunkSize;
             MPI_Recv(&localChunkSize, 1, MPI_LONG, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
             if(debug)
-                printf("rank: %d, localChunkSize: %ld\n", i, localChunkSize);
+                cout << "localChunkSize: " << localChunkSize << endl;
 
-            //allocate memory for localZArray
-            int* localZArray = (int*)malloc((localChunkSize) * sizeof(int));
-
-            //receive the localZArray from each process
-            MPI_Recv(localZArray, localChunkSize, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&isDivided, 1, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&isPrefixRepeated, 1, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-            if(isDivided != -1)
-                cout << "combing: rank " << i << "  isDivided by  is " << isDivided << " && isPrefixRepeated: " << isPrefixRepeated << endl;
-
-            //print Zarray with index
-            if(1 || debug){
-                printf("rank: %d, localZArray: ", i);
-                for(int j = 0; j < recvSize; j++){
-                    printf("%d: %d \n", j, zArray[j]);
-                }
-                printf("\n");
+            localZArray = (int*)malloc(localChunkSize * sizeof(int));
+            //check if memory is allocated
+            if(localZArray == NULL){
+                printf("Error: Unable to allocate memory for localZArray\n");
+                return 0;
             }
 
+            MPI_Recv(localZArray, localChunkSize, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&isDivided, 1, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            if(isDivided != -1 && debug)
+                cout << "combining: rank " << i << "  isDivided by  is " << isDivided << endl;
+            
             if(isDivided != -1){
                 while(isDivided >0){
                     int currPos = recvSize - patternLength + isDivided;
                     if(currPos !=0){
-                        //cout <<"first: " <<recvSize - isDivided << "\n";
-                        cout <<"second: " <<recvSize - (patternLength - isDivided) << "\n";
+                        if(debug)
+                            cout <<"Curr data: " <<recvSize - (patternLength - isDivided) << "\n";
                         //cout << "Zarray[recvSize - isDivided]: " << zArray[recvSize- isDivided] << " isDivided: " << isDivided <<"," << patternLength - isDivided<< endl;
-
                         if(zArray[currPos] == patternLength - isDivided){
                             //cout << "pattern found at index " << pos+1 << endl;
                             //update the zArray
@@ -474,38 +434,16 @@ int main(int argc, char* argv[]) {
                             //cout<<"seconds works";
                         }
                         else{
-                            cout << "pattern not found" << endl;
+                            if(debug)
+                                cout << "pattern not found" << endl;
                         }
-                        /*if(zArray[recvSize - isDivided] == isDivided){
-                            //cout << "pattern found at index " << pos+1 << endl;
-                            //update the zArray
-                            zArray[recvSize - isDivided] = zArray[recvSize - isDivided] + (patternLength - isDivided);
-                        }
-                        else{
-                            cout << "pattern not found" << endl;
-                        }*/
                     }
-                    //cout << "Zarray[recvSize - isDivided]: " << zArray[recvSize- isDivided] << " isDivided: " << isDivided << endl;
                     isDivided--;
+                    if(debug)
                         cout << "Zarray[recvSize - isDivided]: " << zArray[recvSize- isDivided] << " isDivided: " << isDivided << endl;
-
                 }
             }
             
-
-            
-
-            /*if(zArray[pos] == patternLength - isDivided -1){
-                    //cout << "pattern found at index " << pos+1 << endl;
-                    //update the zArray
-                    zArray[pos] = patternLength;
-                }
-                else{
-                    cout << "pattern not found" << endl;
-                }
-                */
-
-
             //print localZArray
             if(debug && dataDebug){
                 printf("rank: %d, localZArray: ", rank);
@@ -514,42 +452,63 @@ int main(int argc, char* argv[]) {
                 }
                 printf("\n");
             }
-
             //copy the localZArray to zArray
             for(int j = 0; j < localChunkSize; j++){
                 zArray[recvSize + j] = localZArray[j];
             }
-
-            //update recvSize
+            
             recvSize += localChunkSize;
         }
+       
+        endTime1 = clock();
 
-        //print zArray
-        if(debug){
-            printf("final zArray: ");
+        double cpu_time_used = ((double) (endTime1 - startTime1)) / CLOCKS_PER_SEC;
+
+        printf("Time taken: %f (s)\n", cpu_time_used);
+        
+        if(dataDebug){
             for(int i = 0; i < zArrayLength; i++){
                 printf("%d ", zArray[i]);
             }
             printf("\n");
-        }  
+        }
+        
+        if(writeToTxt)
+            writeOutputToTxt(zArray, zArrayLength, patternLength);
+        else
+            writeOutputToBinary(zArray, zArrayLength);
 
-        //write the output to the output file
-        writeOutputToTxt(zArray, zArrayLength, patternLength);
+        //count occurrences of pattern
+        int count = 0;
+        for(int i = 0; i < zArrayLength; i++){
+            if(zArray[i] == patternLength){
+                count++;
+            }
+        }
+
+        cout << "Pattern found " << count << " times" << endl;
+        
+        //free the memory allocated for zArray
+        free(zArray);
+
+        
     }
     else{
-        //send the chunkSize to the root process
+        if(logDebug){
+            printf("Rank %d sending data\n", rank);
+            cout << "chunkSize: " << chunkSize << endl;
+        }
+
+        //send local chunk size
         MPI_Send(&chunkSize, 1, MPI_LONG, 0, 0, MPI_COMM_WORLD);
-        MPI_Send(localZArray, chunkSize, MPI_INT, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(localZArray, chunkSize, MPI_INT, 0, 0, MPI_COMM_WORLD);  
         MPI_Send(&isDivided, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
-        MPI_Send(&isPrefixRepeated, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
     }
 
-
-    //MPI_Barrier(MPI_COMM_WORLD);
+    // Finalize the MPI environment.
     MPI_Finalize();
-    
-    if(debug || rank == 0){
-        printf("successfully executed main\n");
-    }
+
+    if(debug && rank == 0)
+        cout <<"Successful exit by rank " << rank << endl;
     return 0;
 }
